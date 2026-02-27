@@ -1,16 +1,15 @@
 # CI Leave & Attendance Bot
 
-A Slack bot for **Chameleon Ideas** that automates leave filing and attendance summaries. It posts daily check-ins every weekday morning and a full weekly leave summary every Friday — keeping the whole team informed without any manual effort.
+A Slack bot for **Chameleon Ideas** that provides on-demand leave and attendance summaries. Team members can use slash commands to check who is on leave, file leaves, or view all upcoming absences — keeping the whole team informed without any manual effort.
 
 ---
 
 ## Features
 
-- **Daily Summary** — Automatically posts at 9:00 AM (Manila time) every weekday with who is on leave
-- **Weekly Summary** — Automatically posts at 5:00 PM every Friday with the full week's leave overview
 - **Slash Command** — `/leave-summary` lets any team member check status or file a leave directly from Slack
 - **Leave Filing** — Record sick, vacation, emergency, or half-day leaves with date range and reason
 - **Leave Listing** — View all active and upcoming leaves at a glance
+- **Channel Integration** — Reads from `#attendance` channel and posts summaries to `#ops` channel
 
 ---
 
@@ -36,8 +35,8 @@ A Slack bot for **Chameleon Ideas** that automates leave filing and attendance s
 
 ```
 ci-leave-attendance-bot/
-├── server.js           # Express server + cron job schedules
-├── leaveAttendance.js  # Core leave/attendance logic & Slack messaging
+├── server.js           # Express server + slash command handler
+├── leaveAttendance.js  # Core leave/attendance logic & Slack messaging  
 ├── package.json        # Dependencies
 ├── .env.example        # Environment variable template
 └── README.md
@@ -65,55 +64,77 @@ cp .env.example .env
 ```
 
 ### 4. Create a Slack App
-1. Go to https://api.slack.com/apps and click **Create New App**
-2. Choose **From scratch**, name it `CI Leave Bot`, select your workspace
-3. Under **Incoming Webhooks**, enable it and add a webhook for your `#attendance` or `#general` channel
-4. Under **Slash Commands**, create `/leave-summary` pointing to `https://your-server.com/slack/commands`
-5. Under **OAuth & Permissions**, add scopes: `chat:write`, `commands`
-6. Copy the **Webhook URL**, **Bot Token**, and **Signing Secret** into your `.env`
 
-### 5. Run the bot
-```bash
-npm start
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps)
+2. Click "Create New App" → "From scratch"
+3. Name it "CI Leave & Attendance Bot" and select your workspace
+4. Navigate to **OAuth & Permissions**:
+   - Add Bot Token Scopes:
+     - `channels:read`
+     - `channels:history`
+     - `chat:write`
+     - `commands`
+5. Navigate to **Slash Commands** and create a new command:
+   - Command: `/leave-summary`
+   - Request URL: `https://your-railway-url.railway.app/slack/command`
+   - Short Description: "Check leave status or file a leave"
+   - Usage Hint: `[today|week|list|file @name type YYYY-MM-DD YYYY-MM-DD reason]`
+6. Install the app to your workspace
+7. Copy the **Bot User OAuth Token** and **Signing Secret** to your `.env` file
+
+### 5. Deploy to Railway
+
+1. Create a Railway account at [https://railway.app](https://railway.app)
+2. Create a new project and link your GitHub repository
+3. Add environment variables in Railway:
+   - `SLACK_BOT_TOKEN`
+   - `SLACK_SIGNING_SECRET`
+   - `ATTENDANCE_CHANNEL_NAME` (default: "attendance")
+   - `OPS_CHANNEL_NAME` (default: "ops")
+4. Railway will automatically deploy your bot
+5. Copy the generated Railway URL and update your Slack slash command Request URL
+
+### 6. Usage
+
+Go to any Slack channel (preferably `#ops`) and use the slash command:
+
 ```
-
----
-
-## Deployment
-
-You can deploy this to any Node.js hosting platform:
-
-- **Railway** — Connect your GitHub repo and set environment variables in the dashboard
-- **Render** — Free tier available, set `npm start` as the start command
-- **Heroku** — `git push heroku main` after configuring Config Vars
-- **VPS** — Use `pm2 start server.js` for process management
-
-> Make sure your deployment URL is publicly accessible so Slack can reach `/slack/commands` for slash commands.
+/leave-summary today
+/leave-summary week
+/leave-summary list
+/leave-summary file @john sick 2025-03-01 2025-03-02 Not feeling well
+```
 
 ---
 
 ## Environment Variables
 
-| Variable | Description |
-|---|---|
-| `SLACK_WEBHOOK_URL` | Incoming Webhook URL from Slack |
-| `SLACK_BOT_TOKEN` | Bot OAuth Token (xoxb-...) |
-| `SLACK_SIGNING_SECRET` | For verifying slash command payloads |
-| `PORT` | Server port (default: 3000) |
-| `TIMEZONE` | Cron timezone (default: Asia/Manila) |
-| `DAILY_CHANNEL_ID` | Channel for daily summaries |
-| `WEEKLY_CHANNEL_ID` | Channel for weekly summaries |
+| Variable | Description | Example |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token from Slack | `xoxb-...` |
+| `SLACK_SIGNING_SECRET` | Signing Secret from Slack | `...` |
+| `ATTENDANCE_CHANNEL_NAME` | Channel to read attendance data from | `attendance` |
+| `OPS_CHANNEL_NAME` | Channel to post summaries to | `ops` |
+| `PORT` | Server port (auto-assigned by Railway) | `8080` |
 
 ---
 
-## Built With
+## Technical Stack
 
-- [Node.js](https://nodejs.org/)
-- [Express](https://expressjs.com/)
-- [node-cron](https://github.com/node-cron/node-cron)
-- [axios](https://axios-http.com/)
-- [Slack Block Kit](https://api.slack.com/block-kit)
+- **Runtime:** Node.js
+- **Framework:** Express.js
+- **Slack SDK:** @slack/web-api
+- **Deployment:** Railway
+- **Timezone:** Asia/Manila (Philippine Time)
 
 ---
 
-*Chameleon Ideas — Internal Operations Bot*
+## License
+
+MIT License - Feel free to use and modify for your organization.
+
+---
+
+## Support
+
+For issues or questions, please open an issue on GitHub or contact the Chameleon Ideas development team.
