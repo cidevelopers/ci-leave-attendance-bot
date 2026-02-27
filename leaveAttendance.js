@@ -1,4 +1,4 @@
-const axios = require('axios');
+canconst axios = require('axios');
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 
@@ -312,91 +312,110 @@ async function postDailySummary() {
  */
 async function postWeeklySummary() {
   try {
-    console.log('Generating weekly leave summary...');
-    
+    console.log('Generating weekly attendance summary...');
+
     const sourceChannelId = await findChannelByName(SOURCE_CHANNEL_NAME);
     const targetChannelId = await findChannelByName(TARGET_CHANNEL_NAME);
-    
+
     if (!sourceChannelId) {
       console.error(`Could not find source channel: #${SOURCE_CHANNEL_NAME}`);
       return;
     }
-    
+
     if (!targetChannelId) {
       console.error(`Could not find target channel: #${TARGET_CHANNEL_NAME}`);
       return;
     }
 
     const weekRange = getCurrentWeekRange();
-    
+
     // Get messages from the past week
     const lastWeek = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
     const messages = await fetchAttendanceMessages(sourceChannelId, lastWeek.toString());
+
+    // Get all channel members
+    const allMembers = await getChannelMembers(sourceChannelId);
     
-    const leaves = parseLeaveFromMessages(messages);
+    // Filter out excluded users
+    const trackableMembers = allMembers.filter(member => 
+      !EXCLUDED_USERS.includes(member.real_name) && !member.is_bot
+    );
+
+    // Parse attendance from messages - only messages containing "in"
+    const attendanceByUser = {};
+    const attendanceDates = new Set();
+
+    for (const message of messages) {
+      if (message.text && message.text.toLowerCase().trim() === 'in' && message.user) {
+        const date = new Date(parseFloat(message.ts) * 1000).toISOString().split('T')[0];
+        attendanceDates.add(date);
+        
+        if (!attendanceByUser[message.user]) {
+          attendanceByUser[message.user] = new Set();
+        }
+        attendanceByUser[message.user].add(date);
+      }
+    }
+
+    // Convert sets to counts
+    const attendanceCounts = {};
+    for (const [userId, dates] of Object.entries(attendanceByUser)) {
+      attendanceCounts[userId] = dates.size;
+    }
+
+    // Find absent members (those who never checked in this week)
+    const presentUserIds = Object.keys(attendanceCounts);
+    const absentMembers = trackableMembers.filter(member => 
+      !presentUserIds.includes(member.id)
+    );
+
+    // Build summary
+    const totalActive = Object.keys(attendanceCounts).length;
+    
+    let summaryText = `${weekRange.start} to ${weekRange.end}\n\n`;
+    
+    if (totalActive > 0) {
+      summaryText += `*${totalActive} member(s) checked in this week:*\n\n`;
+      
+      // Sort by check-in count (descending)
+      const sorted = Object.entries(attendanceCounts).sort((a, b) => b[1] - a[1]);
+      
+      for (const [userId, count] of sorted) {
+        const member = trackableMembers.find(m => m.id === userId);
+        const displayName = member ? member.real_name : `<@${userId}>`;
+        summaryText += `• ${displayName} - ${count} check-in(s)\n`;
+      }
+    } else {
+      summaryText += `No check-ins found this week.\n`;
+    }
+
+    if (absentMembers.length > 0) {
+      summaryText += `\n*${absentMembers.length} member(s) absent this week:*\n`;
+      for (const member of absentMembers) {
+        summaryText += `• ${member.real_name}\n`;
+      }
+    }
+
+    summaryText += `\n_Data from #${SOURCE_CHANNEL_NAME} (excluding ${EXCLUDED_USERS.join(', ')})_`;
 
     const blocks = [
       {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `📊 Weekly Leave Summary - Week of ${weekRange.start}`
+          text: `📊 This Week's Attendance Summary`
         }
       },
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${weekRange.start} to ${weekRange.end}*\n\n` +
-                (leaves.length > 0 
-                  ? `Found ${leaves.length} leave-related message(s) in #${SOURCE_CHANNEL_NAME} this week:`
-                  : `No leave messages found in #${SOURCE_CHANNEL_NAME} this week.`)
+          text: summaryText
         }
       }
     ];
 
-    if (leaves.length > 0) {
-      // Group by user
-      const byUser = {};
-      for (const leave of leaves) {
-        if (!byUser[leave.userId]) {
-          byUser[leave.userId] = [];
-        }
-        byUser[leave.userId].push(leave);
-      }
-
-      for (const [userId, userLeaves] of Object.entries(byUser)) {
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*<@${userId}>* (${userLeaves.length} message(s))`
-          }
-        });
-        
-        for (const leave of userLeaves.slice(0, 3)) { // Show first 3
-          blocks.push({
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `  ◦ ${leave.date}: ${leave.text.substring(0, 150)}${leave.text.length > 150 ? '...' : ''}`
-            }
-          });
-        }
-      }
-    }
-
-    blocks.push({
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `_Posted by CI Leave Attendance Bot • Data from #${SOURCE_CHANNEL_NAME}_`
-        }
-      ]
-    });
-
-    await postToChannel(targetChannelId, `Weekly Leave Summary - ${weekRange.start}`, blocks);
+    await postToChannel(targetChannelId, `Weekly Attendance Summary - ${weekRange.start}`, blocks);
     console.log('Weekly summary posted successfully');
   } catch (err) {
     console.error('Error in postWeeklySummary:', err.message);
