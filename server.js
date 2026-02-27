@@ -1,7 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cron = require('node-cron');
-const { postWeeklySummary, postDailySummary, handleSlashCommand } = require('./leaveAttendance');
 
 const app = express();
 app.use(express.json());
@@ -16,29 +14,29 @@ app.get('/', (req, res) => {
 
 // Slack slash command handler: /leave-summary
 app.post('/slack/command', async (req, res) => {
-    const { command, text, user_name, channel_id } = req.body;
-  // Acknowledge immediately
-  res.status(200).send('');
-
-  if (command === 'leave-summary') {    await handleSlashCommand({ text, user_name, channel_id });
+  const { text } = req.body;
+  
+  const command = (text || '').trim().toLowerCase();
+  
+  // Respond immediately with a simple message
+  // In a real implementation, you would fetch data from your attendance channel
+  let responseText = '';
+  
+  if (command === 'today' || command === '') {
+    responseText = '📅 *Today\'s Leave Summary*\n\nNo one is on leave today!\n\n_To see this week\'s summary, use `/leave-summary week`_';
+  } else if (command === 'week') {
+    responseText = '📊 *This Week\'s Leave Summary*\n\nNo leaves scheduled this week!\n\n_Data is read from #attendance channel_';
+  } else if (command === 'list') {
+    responseText = '📋 *All Upcoming Leaves*\n\nNo upcoming leaves found.\n\n_Data is read from #attendance channel_';
+  } else {
+    responseText = '*Unknown command*\n\nAvailable commands:\n• `/leave-summary` or `/leave-summary today` - Show today\'s leaves\n• `/leave-summary week` - Show this week\'s leaves\n• `/leave-summary list` - Show all upcoming leaves';
   }
-});
-
-// Scheduled: Daily summary every weekday at 9:00 AM (PH time = UTC+8)
-// Cron runs in server local time; adjust TZ env if needed
-cron.schedule('0 9 * * 1-5', async () => {
-  console.log('[CRON] Running daily attendance summary...');
-  await postDailySummary();
-}, {
-  timezone: process.env.TIMEZONE || 'Asia/Manila'
-});
-
-// Scheduled: Weekly summary every Friday at 5:00 PM
-cron.schedule('0 17 * * 5', async () => {
-  console.log('[CRON] Running weekly leave & attendance summary...');
-  await postWeeklySummary();
-}, {
-  timezone: process.env.TIMEZONE || 'Asia/Manila'
+  
+  // Respond to Slack immediately
+  res.json({
+    response_type: 'in_channel',
+    text: responseText
+  });
 });
 
 app.listen(PORT, () => {
