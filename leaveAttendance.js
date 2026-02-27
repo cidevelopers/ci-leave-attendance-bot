@@ -6,6 +6,9 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SOURCE_CHANNEL_NAME = 'attendance';
 const TARGET_CHANNEL_NAME = 'ops';
 
+// Users to exclude from attendance tracking (managers)
+const EXCLUDED_USERS = ['Tuaha', 'Sa\'ad'];
+
 // In-memory store for leave records (replace with DB/Google Sheet integration as needed)
 // Format: { userId, userName, type, startDate, endDate, reason, status }
 let leaveRecords = [];
@@ -36,6 +39,61 @@ async function findChannelByName(channelName) {
   } catch (err) {
     console.error('Error finding channel:', err.message);
     return null;
+  }
+}
+
+/**
+ * Get channel members with user info
+ */
+async function getChannelMembers(channelId) {
+  try {
+    // Get channel members
+    const membersResponse = await axios.get('https://slack.com/api/conversations.members', {
+      headers: {
+        'Authorization': `Bearer ${SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      params: { channel: channelId }
+    });
+
+    if (!membersResponse.data.ok) {
+      console.error('Error fetching members:', membersResponse.data.error);
+      return [];
+    }
+
+    const userIds = membersResponse.data.members || [];
+    const users = [];
+
+    // Get user info for each member
+    for (const userId of userIds) {
+      try {
+        const userResponse = await axios.get('https://slack.com/api/users.info', {
+          headers: {
+            'Authorization': `Bearer ${SLACK_BOT_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          params: { user: userId }
+        });
+
+        if (userResponse.data.ok && userResponse.data.user) {
+          const user = userResponse.data.user;
+          // Exclude bots and excluded users
+          if (!user.is_bot && !EXCLUDED_USERS.includes(user.real_name || user.name)) {
+            users.push({
+              id: userId,
+              name: user.real_name || user.name
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`Error fetching user ${userId}:`, err.message);
+      }
+    }
+
+    return users;
+  } catch (err) {
+    console.error('Error in getChannelMembers:', err.message);
+    return [];
   }
 }
 
@@ -93,23 +151,17 @@ function getCurrentWeekRange() {
 }
 
 /**
- * Parse messages from the attendance channel to extract leave data
- * This is a simple parser that looks for common patterns. Adjust based on your actual message format.
- */
+ * Parse messages from the attendance channel to track check-ins ("in" messages)
+  */
 function parseLeaveFromMessages(messages) {
-  const leaves = [];
+    const attendance = [];
   
   for (const msg of messages) {
     const text = msg.text || '';
-    // Example parsing logic - adjust based on your actual message format
-    // Looking for patterns like "leave", "PTO", "vacation", date ranges, etc.
     
-    // Simple example: detect if message contains leave-related keywords
-    const leaveKeywords = ['leave', 'pto', 'vacation', 'sick', 'day off', 'absent'];
-    const hasLeaveKeyword = leaveKeywords.some(kw => text.toLowerCase().includes(kw));
-    
-    if (hasLeaveKeyword && msg.user) {
-      leaves.push({
+    // Only count messages that contain "in" (case insensitive)
+    if (text.toLowerCase().includes('in') && msg.user) {
+      attendance.push({
         userId: msg.user,
         text: text,
         timestamp: msg.ts,
@@ -118,13 +170,13 @@ function parseLeaveFromMessages(messages) {
     }
   }
   
-  return leaves;
-}
+  return attendance
+    }
 
 /**
  * Fetch messages from attendance channel for a given time period
  */
-async function fetchAttendanceMessages(channelId, oldestTimestamp = null) {
+;ync function fetchAttendanceMessages(channelId, oldestTimestamp = null) {
   try {
     const params = {
       channel: channelId,
@@ -156,12 +208,9 @@ async function fetchAttendanceMessages(channelId, oldestTimestamp = null) {
 }
 
 /**
- * Post daily leave summary to ops channel
- */
+ * Post daily attendance summary to ops cha */
 async function postDailySummary() {
-  try {
-    console.log('Generating daily leave summary...');
-    
+    console.log('Geneerating daily attendance summary...'
     const sourceChannelId = await findChannelByName(SOURCE_CHANNEL_NAME);
     const targetChannelId = await findChannelByName(TARGET_CHANNEL_NAME);
     
@@ -179,35 +228,62 @@ async function postDailySummary() {
     const yesterday = Math.floor(Date.now() / 1000) - (24 * 60 * 60);
     const messages = await fetchAttendanceMessages(sourceChannelId, yesterday.toString());
     
-    const leaves = parseLeaveFromMessages(messages);
+    co    // Get all channel members
+    const allMembers = await getChannelMembers(sourceChannelId);
+    const attendance = parseLeaveFromMessages(messages);
     const today = getTodayString();
+
+    // Get list of users who checked in
+    const checkedInUserIds = new Set(attendance.map(a => a.userId));
+    
+    // Find absent members (excluding managers)
+    const absentMembers = allMembers.filter(member => !checkedInUserIds.has(member.id));
 
     const blocks = [
       {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `📅 Daily Leave Summary - ${today}`
+          text: `📊 Daily Attendance Summary - ${today}`
         }
       },
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: leaves.length > 0 
-            ? `*Found ${leaves.length} leave-related message(s) in #${SOURCE_CHANNEL_NAME} (last 24h):*`
-            : `No leave messages found in #${SOURCE_CHANNEL_NAME} in the last 24 hours.`
+          text: `*${attendance.length} member(s) checked in today*`
         }
       }
     ];
 
-    if (leaves.length > 0) {
-      for (const leave of leaves) {
+    if (attendance.length > 0) {
+      for (const record of attendance) {
         blocks.push({
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `• <@${leave.userId}>: ${leave.text.substring(0, 200)}${leave.text.length > 200 ? '...' : ''}`
+            text: `✅ <@${record.userId}>`
+          }
+        });
+      }
+    }
+
+    // Show absent members
+    if (absentMembers.length > 0) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `\n*⚠️ Absent Today (${absentMembers.length} member(s)):*`
+        }
+      });
+
+      for (const member of absentMembers) {
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `❌ <@${member.id}> (${member.name})`
           }
         });
       }
@@ -218,18 +294,17 @@ async function postDailySummary() {
       elements: [
         {
           type: 'mrkdwn',
-          text: `_Posted by CI Leave Attendance Bot • Data from #${SOURCE_CHANNEL_NAME}_`
+          text: `_Posted by CI Attendance Bot • Data from #${SOURCE_CHANNEL_NAME}_`
         }
       ]
     });
 
-    await postToChannel(targetChannelId, `Daily Leave Summary - ${today}`, blocks);
+    await postToChannel(targetChannelId, `Daily Attendance Summary - ${today}`, blocks);
     console.log('Daily summary posted successfully');
   } catch (err) {
     console.error('Error in postDailySummary:', err.message);
   }
 }
-
 /**
  * Post weekly leave summary to ops channel
  */
