@@ -15,14 +15,12 @@ app.get('/', (req, res) => {
 });
 
 // Slack slash command handler: /leave-summary
-app.post('/slack/commands', async (req, res) => {
-  const { command, text, user_name, channel_id } = req.body;
+app.post('/slack/command', async (req, res) => {  const { command, text, user_name, channel_id } = req.body;
 
   // Acknowledge immediately
   res.status(200).send('');
 
-  if (command === '/leave-summary') {
-    await handleSlashCommand({ text, user_name, channel_id });
+  if (command === 'leave-summary') {    await handleSlashCommand({ text, user_name, channel_id });
   }
 });
 
