@@ -159,10 +159,12 @@ function parseLeaveFromMessages(messages) {
   for (const msg of messages) {
     const text = msg.text || '';
     
-    // Only count messages that contain "in" (case insensitive)
-    if (text.toLowerCase().includes('in') && msg.user) {
-      attendance.push({
-        userId: msg.user,
+    // Only count messages that are exactly 'in' or start with 'in '    if (text.toLowerCase().includes('in') && msg.user) {
+    const lowerText = text.toLowerCase().trim();
+    // Check if message is exactly 'in' or starts with 'in ' (to avoid matching 'break', 'working', etc.)
+    const isCheckIn = lowerText === 'in' || lowerText.startsWith('in ');
+    
+    if (isCheckIn && msg.user) {        userId: msg.user,
         text: text,
         timestamp: msg.ts,
         date: new Date(parseFloat(msg.ts) * 1000).toLocaleDateString('en-CA')
